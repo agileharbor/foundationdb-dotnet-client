@@ -32,12 +32,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 using FoundationDB.Client.Utils;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
-using System.Runtime.CompilerServices;
+using System.Reflection;
+using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace FoundationDB.Client.Native
 {
@@ -46,14 +45,8 @@ namespace FoundationDB.Client.Native
 		public const int FDB_API_MIN_VERSION = 200;
 		public const int FDB_API_MAX_VERSION = 300;
 
-#if __MonoCS__
 		/// <summary>Name of the C API dll used for P/Invoking</summary>
-		private const string FDB_C_DLL = "libfdb_c.so";
-#else
-		/// <summary>Name of the C API dll used for P/Invoking</summary>
-		private const string FDB_C_DLL = "fdb_c.dll";
-#endif
-
+		private const string FDB_C_DLL = "fdb_c";
 
 		/// <summary>Handle on the native FDB C API library</summary>
 		private static readonly UnmanagedLibrary FdbCLib;
@@ -242,17 +235,19 @@ namespace FoundationDB.Client.Native
 
 			var libraryPath = Fdb.Options.NativeLibPath;
 			if (libraryPath != null)
-			{
 				try
 				{
-					if (libraryPath.Length == 0)
-					{ // CLR will handle the search
-						libraryPath = FDB_C_DLL;
+					if (string.IsNullOrWhiteSpace(Fdb.Options.NativeLibPath))
+					{
+						Fdb.Options.NativeLibPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
 					}
-					else if (!libraryPath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-					{ // add the file name
-						libraryPath = Path.Combine(Fdb.Options.NativeLibPath, FDB_C_DLL);
-					}
+#if NETSTANDARD2_0
+					var libraryExtension = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? ".dll" : ".so";
+#else
+					var libraryExtension = ".dll";
+#endif
+
+					libraryPath = Path.Combine(Fdb.Options.NativeLibPath ?? throw new InvalidOperationException(), FDB_C_DLL + libraryExtension);
 
 					FdbCLib = UnmanagedLibrary.Load(libraryPath);
 				}
@@ -261,16 +256,12 @@ namespace FoundationDB.Client.Native
 					if (FdbCLib != null) FdbCLib.Dispose();
 					FdbCLib = null;
 					if (e is BadImageFormatException && IntPtr.Size == 4)
-					{
-						e = new InvalidOperationException("The native FDB client is 64-bit only, and cannot be loaded in a 32-bit process.", e);
-					}
+						e = new InvalidOperationException(
+							"The native FDB client is 64-bit only, and cannot be loaded in a 32-bit process.", e);
 					else
-					{
 						e = new InvalidOperationException("An error occurred while loading the native FoundationDB library", e);
-					}
 					LibraryLoadError = ExceptionDispatchInfo.Capture(e);
 				}
-			}
 		}
 
 		private static void EnsureLibraryIsLoaded()
@@ -884,7 +875,7 @@ namespace FoundationDB.Client.Native
 			}
 		}
 
-		#endregion
+#endregion
 
 	}
 

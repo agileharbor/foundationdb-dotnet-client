@@ -31,29 +31,13 @@ namespace FoundationDB.Client.Native
 	using JetBrains.Annotations;
 	using Microsoft.Win32.SafeHandles;
 	using System;
-	using System.Runtime.ConstrainedExecution;
 	using System.Runtime.InteropServices;
 	using System.Security;
 
 	/// <summary>Native Library Loader</summary>
 	internal sealed class UnmanagedLibrary : IDisposable
 	{
-
-
 		// See http://msdn.microsoft.com/msdnmag/issues/05/10/Reliability/ for more about safe handles.
-
-#if __MonoCS__
-		[SuppressUnmanagedCodeSecurity]
-		public sealed class SafeLibraryHandle : FdbSafeHandle
-		{
-
-			protected override void Destroy(IntPtr handle)
-			{
-				//cf Issue #49: it is too dangerous to unload the library because callbacks could still fire from the native side
-				//DISABLED: NativeMethods.FreeLibrary(handle);
-			}
-		}
-#else
 		[SuppressUnmanagedCodeSecurity]
 		public sealed class SafeLibraryHandle : SafeHandleZeroOrMinusOneIsInvalid
 		{
@@ -66,41 +50,27 @@ namespace FoundationDB.Client.Native
 				return true;
 			}
 		}
-#endif
-
 
 		[SuppressUnmanagedCodeSecurity]
 		private static class NativeMethods
 		{
-#if __MonoCS__
-			const string KERNEL = "dl";
-
-			[DllImport(KERNEL)]
-			public static extern SafeLibraryHandle dlopen(string fileName, int flags);
-
-			[DllImport(KERNEL, SetLastError = true)]
-			[return: MarshalAs(UnmanagedType.Bool)]
-			public static extern int dlclose(IntPtr hModule);
-
-			public static SafeLibraryHandle LoadLibrary(string fileName)
-			{
-
-				return dlopen(fileName, 1);
-				
-			}
-			public static bool FreeLibrary(IntPtr hModule) { return dlclose(hModule) == 0; }
-
-#else
 			const string KERNEL = "kernel32";
 
 			[DllImport(KERNEL, CharSet = CharSet.Auto, BestFitMapping = false, SetLastError = true)]
 			public static extern SafeLibraryHandle LoadLibrary(string fileName);
 
-			[ReliabilityContract(Consistency.WillNotCorruptState, Cer.Success)]
-			[DllImport(KERNEL, SetLastError = true)]
-			[return: MarshalAs(UnmanagedType.Bool)]
-			public static extern bool FreeLibrary(IntPtr hModule);
+
+			[DllImport("libdl.so")]
+			private static extern SafeLibraryHandle dlopen(string fileName, int flags);
+
+			public static SafeLibraryHandle LoadLibraryForCurrentOS(string fileName)
+			{
+#if NETSTANDARD2_0
+				return System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? LoadLibrary(fileName) : dlopen(fileName, 1);
+#else
+				return LoadLibrary(fileName);
 #endif
+			}
 		}
 
 		/// <summary>Load a native library into the current process</summary>
@@ -112,7 +82,7 @@ namespace FoundationDB.Client.Native
 		{
 			if (path == null) throw new ArgumentNullException("path");
 
-			var handle = NativeMethods.LoadLibrary(path);
+			var handle = NativeMethods.LoadLibraryForCurrentOS(path);
 			if (handle == null || handle.IsInvalid)
 			{
 				var ex = Marshal.GetExceptionForHR(Marshal.GetHRForLastWin32Error());
